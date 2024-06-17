@@ -24,6 +24,7 @@ from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 import cv2
 import re
+import json
 
 def read_depth_normalized(path, normalized_const=1.):
     with open(path, "rb") as fid:
@@ -213,7 +214,7 @@ def readSLAMCameras(cam_intrinsics, images_folder, depth_images_folder=None):
         image_path = os.path.join(images_folder, key)
         image_name = key.split(".")[0]
         
-        # Too many open files 수정
+        # Too many open files
         temp = Image.open(image_path)
         image = temp.copy()
         
@@ -228,6 +229,49 @@ def readSLAMCameras(cam_intrinsics, images_folder, depth_images_folder=None):
             depth_image_name = image_name
             temp_depth = read_depth_png(depth_image_path, cam_intrinsics[6])
             depth_image = temp_depth.copy()
+
+        cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, FocalX=FocalX, FocalY=FocalY, CenterX=CenterX, CenterY=CenterY, 
+                              image=image, depth_image=depth_image,
+                              image_path=image_path, image_name=image_name, width=width, height=height,
+                              depth_image_name = depth_image_name)
+        cam_infos.append(cam_info)
+    sys.stdout.write('\n')
+    return cam_infos
+
+def readSLAMCamerasZed(cam_intrinsics, images_folder, depth_images_folder=None):
+    cam_infos = []
+    image_files = os.listdir(images_folder)
+    
+    for idx, key in enumerate(image_files):
+        sys.stdout.write('\r')
+        # the exact output you're looking for:
+        sys.stdout.write("Reading camera {}/{}".format(idx+1, len(image_files)))
+        sys.stdout.flush()
+
+        R = np.identity(3)
+        T = np.array([0,0,0])
+        # TODO: Convert intrinsics
+        width = int(cam_intrinsics[0])
+        height = int(cam_intrinsics[1])
+        FocalX = float(cam_intrinsics[2])
+        FocalY = float(cam_intrinsics[3])
+        FovY = focal2fov(FocalY, height)
+        FovX = focal2fov(FocalX, width)
+        CenterX = float(cam_intrinsics[4])
+        CenterY = float(cam_intrinsics[5])
+        uid = idx
+        
+        image_path = os.path.join(images_folder, key)
+        image_name = key.split(".")[0]
+        
+        # Too many open files
+        temp = Image.open(image_path)
+        image = temp.copy()
+        
+        depth_path = os.path.join(depth_images_folder, image_name.replace("png", "npy"))
+        depth_image_name = image_name.replace(".png", "")
+        temp_depth = Image.fromarray(np.load(depth_path))
+        depth_image = temp_depth.copy()
 
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, FocalX=FocalX, FocalY=FocalY, CenterX=CenterX, CenterY=CenterY, 
                               image=image, depth_image=depth_image,
@@ -321,6 +365,33 @@ def readSLAMSceneInfo(path, images, eval, llffhold=8):
     cam_intrinsics = cam_intrinsics_[2].split()
     
     cam_infos_unsorted = readSLAMCameras(cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir), depth_images_folder=os.path.join(path, "depth_images"))
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+
+    train_cam_infos = cam_infos
+    test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+    
+    pcd = None
+    ply_path = None
+    
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
+
+def readSLAMSceneInfoZed(path, images, eval, llffhold=8):
+
+    reading_dir = "images" if images == None else images
+    # Read camera intrinsics
+    cam_intrinsic_file = open(f"{path}/cam_intrinsic_params.json")
+    cam_intrinsics = json.load(cam_intrinsic_file)
+    
+    cam_infos_unsorted = readSLAMCamerasZed(cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir), depth_images_folder=os.path.join(path, "depth"))
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
 
